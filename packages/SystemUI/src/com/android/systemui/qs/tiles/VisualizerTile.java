@@ -21,12 +21,15 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
+import android.database.ContentObserver;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.media.audiofx.AudioEffect;
 import android.os.AsyncTask;
 import android.os.PowerManager;
+import android.os.UserHandle;
+import android.os.Handler;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -55,6 +58,7 @@ public class VisualizerTile extends QSTile<QSTile.BooleanState>  implements Keyg
     private boolean mLinked;
     private boolean mListening;
     private boolean mPowerSaveModeEnabled;
+    private PulseObserver mObserver;
 
     private MediaMonitor mMediaMonitor;
 
@@ -92,6 +96,7 @@ public class VisualizerTile extends QSTile<QSTile.BooleanState>  implements Keyg
 
                 mHandler.removeCallbacks(mRefreshStateRunnable);
                 mHandler.postDelayed(mRefreshStateRunnable, 50);
+                mObserver = new PulseObserver(mHandler);
             }
         };
 
@@ -189,7 +194,7 @@ public class VisualizerTile extends QSTile<QSTile.BooleanState>  implements Keyg
 
     @Override
     protected void handleUpdateState(BooleanState state, Object arg) {
-        state.visible = true;
+        state.visible = !isPulseEnabled();
         state.label = mContext.getString(R.string.quick_settings_visualizer_label);
         state.contentDescription = mContext.getString(
                 R.string.accessibility_quick_settings_visualizer);
@@ -198,11 +203,23 @@ public class VisualizerTile extends QSTile<QSTile.BooleanState>  implements Keyg
             mUiHandler.post(mUpdateVisibilities);
         }
     }
+    
+     private boolean isPulseEnabled() {
+        return Settings.Secure.getIntForUser(mContext.getContentResolver(),
+                Settings.Secure.FLING_PULSE_ENABLED, 0,
+                UserHandle.USER_CURRENT) == 1;
+    }
+    
 
     @Override
     public void setListening(boolean listening) {
         if (mListening == listening) return;
         mListening = listening;
+        if (listening) {
+            mObserver.startObserving();
+        } else {
+            mObserver.endObserving();
+        }
         doLinkage();
         // refresh state is called by QSPanel right after calling into this.
     }
@@ -339,6 +356,27 @@ public class VisualizerTile extends QSTile<QSTile.BooleanState>  implements Keyg
             }
 
             canvas.drawLines(mFFTPoints, mPaint);
+        }
+    }
+    
+      private class PulseObserver extends ContentObserver {
+        public PulseObserver(Handler handler) {
+            super(handler);
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            refreshState();
+        }
+
+        public void startObserving() {
+            mContext.getContentResolver().registerContentObserver(
+                    Settings.Secure.getUriFor(Settings.Secure.FLING_PULSE_ENABLED),
+                    false, this, UserHandle.USER_ALL);
+        }
+
+        public void endObserving() {
+            mContext.getContentResolver().unregisterContentObserver(this);
         }
     }
 }
